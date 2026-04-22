@@ -1,0 +1,15 @@
+{
+  "name": "Massagem Perto de Mim",
+  "short_name": "Massagem",
+  "description": "Encontre casas de massagem, spas e centros de bem-estar perto de você.",
+  "start_url": "./?utm=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
