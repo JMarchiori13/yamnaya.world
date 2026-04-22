@@ -7,6 +7,42 @@
     "https://overpass.openstreetmap.fr/api/interpreter",
   ];
   const NOMINATIM = "https://nominatim.openstreetmap.org";
+  const OVERPASS_TIMEOUT_MS = 30000;
+  const OVERPASS_CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+
+  const STORE = {
+    get(key) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+    },
+    set(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    },
+    del(key) {
+      try { localStorage.removeItem(key); } catch {}
+    },
+  };
+
+  function geohash5(lat, lon) {
+    return `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  }
+  function overpassCacheKey(lat, lon, radius) {
+    return `cache:overpass:${geohash5(lat, lon)}:${radius}`;
+  }
+  function readOverpassCache(lat, lon, radius) {
+    const entry = STORE.get(overpassCacheKey(lat, lon, radius));
+    if (!entry || !entry.ts || !entry.data) return null;
+    const age = Date.now() - entry.ts;
+    if (age > OVERPASS_CACHE_TTL_MS) return null;
+    return { data: entry.data, ageMs: age };
+  }
+  function writeOverpassCache(lat, lon, radius, data) {
+    STORE.set(overpassCacheKey(lat, lon, radius), { data, ts: Date.now() });
+  }
+
+  function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
   const els = {
     map: document.getElementById("map"),
@@ -153,22 +189,47 @@
     `;
   }
 
+  let currentOverpassController = null;
+
+  async function overpassFetch(endpoint, query, signal) {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(query),
+      signal,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
   async function overpassQuery(query) {
+    if (currentOverpassController) currentOverpassController.abort();
+    currentOverpassController = new AbortController();
+    const { signal } = currentOverpassController;
+    const timeoutId = setTimeout(() => currentOverpassController.abort(), OVERPASS_TIMEOUT_MS);
+
     let lastErr;
-    for (const endpoint of OVERPASS_ENDPOINTS) {
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: "data=" + encodeURIComponent(query),
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return await res.json();
-      } catch (err) {
-        lastErr = err;
+    const backoff = [0, 500, 1000, 2000];
+    try {
+      for (let attempt = 0; attempt < backoff.length; attempt++) {
+        const endpoint = OVERPASS_ENDPOINTS[attempt % OVERPASS_ENDPOINTS.length];
+        if (attempt > 0) {
+          const jitter = Math.floor(Math.random() * 250);
+          await sleep(backoff[attempt] + jitter);
+        }
+        if (signal.aborted) throw new Error("Busca cancelada");
+        try {
+          return await overpassFetch(endpoint, query, signal);
+        } catch (err) {
+          if (err.name === "AbortError") throw new Error("Tempo esgotado");
+          lastErr = err;
+        }
       }
+      throw lastErr || new Error("Falha ao consultar Overpass");
+    } finally {
+      clearTimeout(timeoutId);
+      currentOverpassController = null;
     }
-    throw lastErr || new Error("Falha ao consultar Overpass");
   }
 
   function normalizeElement(el) {
@@ -350,11 +411,41 @@
     `;
   }
 
-  async function searchNearby(lat, lon, radius) {
-    setStatus(`Procurando casas de massagem em ${(radius / 1000).toFixed(0)} km…`, "loading");
+  let lastSearch = null;
+
+  function formatAge(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m} min`;
+    const h = Math.round(m / 60);
+    return `${h} h`;
+  }
+
+  function renderCacheBadge({ fromCache, ageMs }) {
+    const el = document.getElementById("cacheBadge");
+    if (!el) return;
+    if (!fromCache) {
+      el.classList.add("hidden");
+      el.innerHTML = "";
+      return;
+    }
+    el.classList.remove("hidden");
+    el.innerHTML = `📦 dados de ${escapeHtml(formatAge(ageMs))} atrás <button type="button" id="refreshNow">🔄 Atualizar</button>`;
+    const btn = document.getElementById("refreshNow");
+    if (btn) btn.addEventListener("click", () => {
+      if (lastSearch) searchNearby(lastSearch.lat, lastSearch.lon, lastSearch.radius, { force: true });
+    });
+  }
+
+  async function searchNearby(lat, lon, radius, opts = {}) {
+    lastSearch = { lat, lon, radius };
+    const { force = false } = opts;
+    setStatus(`Procurando locais de bem-estar em ${(radius / 1000).toFixed(0)} km…`, "loading");
     clearMarkers();
     rawItems = [];
     renderFilters();
+    renderCacheBadge({ fromCache: false });
 
     if (searchCircle) map.removeLayer(searchCircle);
     searchCircle = L.circle([lat, lon], {
@@ -365,7 +456,17 @@
     }).addTo(map);
 
     try {
-      const data = await overpassQuery(buildOverpassQuery(lat, lon, radius));
+      let data, fromCache = false, ageMs = 0;
+      const cached = force ? null : readOverpassCache(lat, lon, radius);
+      if (cached) {
+        data = cached.data;
+        fromCache = true;
+        ageMs = cached.ageMs;
+      } else {
+        data = await overpassQuery(buildOverpassQuery(lat, lon, radius));
+        writeOverpassCache(lat, lon, radius, data);
+      }
+
       const items = (data.elements || [])
         .map(normalizeElement)
         .filter(Boolean)
@@ -377,6 +478,7 @@
       rawItems = items;
       renderFilters();
       applyFilter();
+      renderCacheBadge({ fromCache, ageMs });
 
       if (items.length) {
         const group = L.featureGroup([userMarker, ...markers.values(), searchCircle].filter(Boolean));

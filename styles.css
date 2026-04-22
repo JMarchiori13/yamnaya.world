@@ -121,6 +121,32 @@ body {
 }
 .filters .chip.active .count { opacity: 0.85; }
 
+.cache-badge {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #fde68a;
+  background: #422006;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cache-badge.hidden { display: none; }
+.cache-badge button {
+  background: transparent;
+  color: #fde68a;
+  border: 1px solid #78350f;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cache-badge button:hover {
+  background: #78350f;
+  color: #fef3c7;
+}
+
 .status {
   padding: 12px;
   font-size: 14px;
