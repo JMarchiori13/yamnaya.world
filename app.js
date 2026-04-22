@@ -76,6 +76,7 @@
     radius: document.getElementById("radius"),
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
+    suggestions: document.getElementById("suggestions"),
     filters: document.getElementById("filters"),
     sortBy: document.getElementById("sortBy"),
   };
@@ -751,6 +752,83 @@
     return { lat: parseFloat(arr[0].lat), lon: parseFloat(arr[0].lon), display: arr[0].display_name };
   }
 
+  let suggestController = null;
+  let suggestDebounce = null;
+  let suggestIndex = -1;
+  let suggestItems = [];
+
+  function hideSuggestions() {
+    if (!els.suggestions) return;
+    els.suggestions.classList.add("hidden");
+    els.suggestions.innerHTML = "";
+    els.searchInput.setAttribute("aria-expanded", "false");
+    suggestIndex = -1;
+    suggestItems = [];
+  }
+
+  function renderSuggestions(list) {
+    if (!els.suggestions) return;
+    els.suggestions.innerHTML = "";
+    if (!list.length) { hideSuggestions(); return; }
+    suggestItems = list;
+    suggestIndex = -1;
+    list.forEach((item, i) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.id = `sugg-${i}`;
+      const main = item.name || item.display_name.split(",")[0];
+      const rest = item.display_name.replace(main, "").replace(/^,\s*/, "");
+      li.innerHTML = `<div>${escapeHtml(main)}</div><div class="sec">${escapeHtml(rest)}</div>`;
+      li.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        pickSuggestion(i);
+      });
+      els.suggestions.appendChild(li);
+    });
+    els.suggestions.classList.remove("hidden");
+    els.searchInput.setAttribute("aria-expanded", "true");
+  }
+
+  function highlightSuggestion(idx) {
+    const nodes = els.suggestions.querySelectorAll("li");
+    nodes.forEach((n, i) => n.setAttribute("aria-selected", i === idx ? "true" : "false"));
+    if (idx >= 0 && nodes[idx]) {
+      nodes[idx].scrollIntoView({ block: "nearest" });
+      els.searchInput.setAttribute("aria-activedescendant", `sugg-${idx}`);
+    } else {
+      els.searchInput.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  function pickSuggestion(i) {
+    const s = suggestItems[i];
+    if (!s) return;
+    els.searchInput.value = s.display_name;
+    hideSuggestions();
+    const lat = parseFloat(s.lat);
+    const lon = parseFloat(s.lon);
+    if (!isFinite(lat) || !isFinite(lon)) return;
+    placeUser(lat, lon);
+    searchNearby(lat, lon, Number(els.radius.value));
+  }
+
+  async function fetchSuggestions(q) {
+    if (suggestController) suggestController.abort();
+    suggestController = new AbortController();
+    const url = `${NOMINATIM}/search?format=json&limit=5&addressdetails=0&q=${encodeURIComponent(q)}`;
+    try {
+      const res = await fetch(url, {
+        headers: { "Accept-Language": "pt-BR" },
+        signal: suggestController.signal,
+      });
+      if (!res.ok) return [];
+      return await res.json();
+    } catch (err) {
+      if (err.name !== "AbortError") console.error(err);
+      return null;
+    }
+  }
+
   els.locate.addEventListener("click", locateMe);
 
   els.radius.addEventListener("change", () => {
@@ -768,6 +846,38 @@
     els.sortBy.addEventListener("change", () => {
       STORE.set("sort", els.sortBy.value);
       if (rawItems.length) applyFilter();
+    });
+  }
+
+  if (els.suggestions && els.searchInput) {
+    els.searchInput.addEventListener("input", () => {
+      const q = els.searchInput.value.trim();
+      clearTimeout(suggestDebounce);
+      if (q.length < 3) { hideSuggestions(); return; }
+      suggestDebounce = setTimeout(async () => {
+        const list = await fetchSuggestions(q);
+        if (list) renderSuggestions(list);
+      }, 300);
+    });
+    els.searchInput.addEventListener("keydown", (e) => {
+      if (els.suggestions.classList.contains("hidden")) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        suggestIndex = Math.min(suggestIndex + 1, suggestItems.length - 1);
+        highlightSuggestion(suggestIndex);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        suggestIndex = Math.max(suggestIndex - 1, 0);
+        highlightSuggestion(suggestIndex);
+      } else if (e.key === "Enter" && suggestIndex >= 0) {
+        e.preventDefault();
+        pickSuggestion(suggestIndex);
+      } else if (e.key === "Escape") {
+        hideSuggestions();
+      }
+    });
+    els.searchInput.addEventListener("blur", () => {
+      setTimeout(hideSuggestions, 100);
     });
   }
 

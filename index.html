@@ -43,10 +43,14 @@
 
   <main class="layout">
     <section class="sidebar" aria-label="Lista de locais">
-      <form id="searchForm" class="search">
-        <input id="searchInput" type="search" placeholder="Buscar cidade, bairro ou endereço" autocomplete="off">
-        <button type="submit">Buscar</button>
-      </form>
+      <div class="search-wrap">
+        <form id="searchForm" class="search">
+          <input id="searchInput" type="search" placeholder="Buscar cidade, bairro ou endereço" autocomplete="off"
+            role="combobox" aria-expanded="false" aria-controls="suggestions" aria-autocomplete="list">
+          <button type="submit">Buscar</button>
+        </form>
+        <ul id="suggestions" class="suggestions hidden" role="listbox"></ul>
+      </div>
 
       <div id="filters" class="filters" aria-label="Filtros por tipo de massagem"></div>
 
