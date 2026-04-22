@@ -44,6 +44,30 @@
 
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+  function getFavorites() { return STORE.get("favorites") || {}; }
+  function isFavorite(id) { return Boolean(getFavorites()[id]); }
+  function toggleFavorite(item) {
+    const favs = getFavorites();
+    if (favs[item.id]) {
+      delete favs[item.id];
+    } else {
+      favs[item.id] = {
+        id: item.id,
+        name: item.name,
+        lat: item.lat,
+        lon: item.lon,
+        category: item.category,
+        phone: item.phone,
+        website: item.website,
+        opening: item.opening,
+        address: item.address,
+        tags: item.tags,
+        savedAt: Date.now(),
+      };
+    }
+    STORE.set("favorites", favs);
+  }
+
   const els = {
     map: document.getElementById("map"),
     results: document.getElementById("results"),
@@ -58,7 +82,10 @@
 
   const FILTERS = [
     { id: "all", label: "Todos" },
+    { id: "favorites", label: "⭐ Favoritos", special: "favorites" },
     { id: "openNow", label: "🟢 Aberto agora", special: "openNow" },
+    { id: "wheelchair", label: "♿ Acessível", tagTest: (t) => t.wheelchair === "yes" || t.wheelchair === "limited" },
+    { id: "female", label: "♀ Feminino", tagTest: (t) => t.female === "yes", keywords: ["feminin", "women only", "mulheres", "só mulher"] },
     { id: "thai", label: "Tailandesa", keywords: ["thai", "tailandes"] },
     { id: "swedish", label: "Sueca", keywords: ["swedish", "sueca", "sueco"] },
     { id: "shiatsu", label: "Shiatsu", keywords: ["shiatsu"] },
@@ -349,9 +376,10 @@
     };
   }
 
+  const HIDDEN_FROM_TAGS = new Set(["all", "openNow", "favorites"]);
   function detectedTypes(item) {
     return FILTERS
-      .filter((f) => f.id !== "all" && !f.special && matchesFilter(item, f.id))
+      .filter((f) => !HIDDEN_FROM_TAGS.has(f.id) && matchesFilter(item, f.id))
       .map((f) => f.label);
   }
 
@@ -375,6 +403,8 @@
     const f = FILTERS.find((x) => x.id === filterId);
     if (!f || f.id === "all") return true;
     if (f.special === "openNow") return item.opening ? isOpenNow(item.opening) : false;
+    if (f.special === "favorites") return isFavorite(item.id);
+    if (f.tagTest && f.tagTest(item.tags || {})) return true;
     if (f.categories && f.categories.includes(item.category)) return true;
     if (f.keywords) {
       const hay = itemHaystack(item);
@@ -384,15 +414,18 @@
   }
 
   function countFor(filterId) {
+    if (filterId === "favorites") return Object.keys(getFavorites()).length;
     return rawItems.reduce((n, it) => n + (matchesFilter(it, filterId) ? 1 : 0), 0);
   }
 
   function renderFilters() {
     els.filters.innerHTML = "";
     const hasData = rawItems.length > 0;
+    const favCount = Object.keys(getFavorites()).length;
     for (const f of FILTERS) {
-      const count = hasData ? countFor(f.id) : null;
-      if (hasData && f.id !== "all" && count === 0) continue;
+      const count = hasData || f.id === "favorites" ? countFor(f.id) : null;
+      const forceShow = (f.id === "favorites" && favCount > 0) || f.id === activeFilter;
+      if (hasData && f.id !== "all" && count === 0 && !forceShow) continue;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "chip" + (activeFilter === f.id ? " active" : "");
@@ -431,9 +464,19 @@
     return [...items].sort(byDist);
   }
 
+  function sourceForFilter() {
+    if (activeFilter === "favorites") {
+      const rawIds = new Set(rawItems.map((i) => i.id));
+      const favs = Object.values(getFavorites());
+      const extras = favs.filter((f) => !rawIds.has(f.id));
+      return [...rawItems, ...extras];
+    }
+    return rawItems;
+  }
+
   function applyFilter() {
     const filtered = sortItems(
-      rawItems.filter((it) => matchesFilter(it, activeFilter)),
+      sourceForFilter().filter((it) => matchesFilter(it, activeFilter)),
       els.sortBy ? els.sortBy.value : "dist"
     );
     clearMarkers();
@@ -455,8 +498,13 @@
 
     const active = FILTERS.find((x) => x.id === activeFilter);
     const label = active && active.id !== "all" ? ` · filtro: <strong>${escapeHtml(active.label)}</strong>` : "";
-    if (!rawItems.length) return;
-    setStatus(`<strong>${filtered.length}</strong> de ${rawItems.length} local(is)${label}.`);
+    if (activeFilter === "favorites" && filtered.length && markers.size) {
+      const group = L.featureGroup([...markers.values()]);
+      map.fitBounds(group.getBounds().pad(0.15));
+    }
+    if (!rawItems.length && activeFilter !== "favorites") return;
+    const total = activeFilter === "favorites" ? filtered.length : rawItems.length;
+    setStatus(`<strong>${filtered.length}</strong> de ${total} local(is)${label}.`);
   }
 
   function renderResults(items, origin) {
@@ -478,8 +526,12 @@
       const price = priceLabel(item.tags);
       const reviewUrl = googleReviewUrl(item);
       const taUrl = tripadvisorSearchUrl(item);
+      const fav = isFavorite(item.id);
       li.innerHTML = `
-        <div class="name">${escapeHtml(item.name)}</div>
+        <div class="name">
+          <button type="button" class="fav ${fav ? "on" : "off"}" title="${fav ? "Remover dos favoritos" : "Salvar nos favoritos"}" aria-pressed="${fav}">${fav ? "★" : "☆"}</button>
+          ${escapeHtml(item.name)}
+        </div>
         <div class="meta">
           <span class="tag">${escapeHtml(item.category)}</span>
           ${types.map((t) => `<span class="tag type">${escapeHtml(t)}</span>`).join("")}
@@ -501,6 +553,13 @@
 
       li.addEventListener("click", (e) => {
         if (e.target.closest("a")) return;
+        if (e.target.closest("button.fav")) {
+          e.stopPropagation();
+          toggleFavorite(item);
+          renderFilters();
+          applyFilter();
+          return;
+        }
         map.setView([item.lat, item.lon], Math.max(map.getZoom(), 16));
         const marker = markers.get(item.id);
         if (marker) marker.openPopup();

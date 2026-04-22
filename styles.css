@@ -222,7 +222,22 @@ body {
 .results .name {
   font-weight: 600;
   margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+.results .name .fav {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 0.15s, transform 0.15s;
+}
+.results .name .fav:hover { transform: scale(1.1); }
+.results .name .fav.on { color: #fbbf24; }
 .results .meta {
   font-size: 13px;
   color: var(--muted);
