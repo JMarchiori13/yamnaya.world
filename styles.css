@@ -1,0 +1,191 @@
+:root {
+  --bg: #0f172a;
+  --panel: #111827;
+  --panel-2: #1f2937;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --accent: #22c55e;
+  --accent-2: #16a34a;
+  --danger: #ef4444;
+  --border: #1f2a3a;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand .logo {
+  font-size: 22px;
+  background: var(--accent);
+  color: #052e16;
+  width: 34px; height: 34px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+}
+.brand h1 { font-size: 18px; margin: 0; font-weight: 600; }
+
+.controls { display: flex; align-items: center; gap: 10px; }
+.controls .radius {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px; color: var(--muted);
+}
+.controls select, .controls button, .search input, .search button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.controls button, .search button {
+  cursor: pointer;
+  background: var(--accent);
+  color: #052e16;
+  border-color: transparent;
+  font-weight: 600;
+}
+.controls button:hover, .search button:hover { background: var(--accent-2); }
+.controls button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  flex: 1;
+  min-height: 0;
+}
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.search {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.search input { flex: 1; }
+
+.status {
+  padding: 12px;
+  font-size: 14px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.status.error { color: #fecaca; background: #3f1d1d; }
+.status.loading::after {
+  content: "";
+  display: inline-block;
+  width: 10px; height: 10px;
+  margin-left: 8px;
+  border: 2px solid var(--muted);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.results li {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.results li:hover, .results li.active {
+  background: var(--panel-2);
+}
+.results .name {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.results .meta {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.results .tag {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.results .addr {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.results .actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.results .actions a {
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.results .actions a:hover { background: #253244; }
+
+.credits {
+  padding: 10px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+.credits a { color: var(--muted); }
+
+.map { width: 100%; height: 100%; }
+
+.leaflet-popup-content-wrapper {
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+}
+.leaflet-popup-tip { background: var(--panel); }
+.leaflet-popup-content { margin: 10px 12px; font-size: 14px; }
+.leaflet-popup-content strong { display: block; margin-bottom: 4px; }
+.leaflet-popup-content a { color: var(--accent); }
+
+@media (max-width: 760px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { max-height: 55vh; border-right: none; border-bottom: 1px solid var(--border); }
+  .brand h1 { font-size: 16px; }
+}
