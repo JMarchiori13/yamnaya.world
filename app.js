@@ -278,6 +278,41 @@
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   }
 
+  const NAME_STOPWORDS = /\b(massagem|massage|spa|clinica|clínica|center|centro|studio|estudio|terapia|therapy|casa|house)\b/gi;
+  function normalizeName(name) {
+    return (name || "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(NAME_STOPWORDS, " ")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function dedupFuzzy(items) {
+    const out = [];
+    for (const item of items) {
+      const norm = normalizeName(item.name);
+      if (!norm) { out.push(item); continue; }
+      const dup = out.find((other) =>
+        normalizeName(other.name) === norm &&
+        haversine(item.lat, item.lon, other.lat, other.lon) < 50
+      );
+      if (!dup) {
+        out.push(item);
+        continue;
+      }
+      const itemTags = Object.keys(item.tags || {}).length;
+      const dupTags = Object.keys(dup.tags || {}).length;
+      if (itemTags > dupTags) {
+        const idx = out.indexOf(dup);
+        out[idx] = item;
+      }
+    }
+    return out;
+  }
+
   function tripadvisorSearchUrl(item) {
     const q = [item.name, cityFromTags(item.tags)].filter(Boolean).join(" ");
     return `https://www.tripadvisor.com/Search?q=${encodeURIComponent(q || item.name)}`;
@@ -682,13 +717,14 @@
         writeOverpassCache(lat, lon, radius, data);
       }
 
-      const items = (data.elements || [])
+      const raw = (data.elements || [])
         .map(normalizeElement)
         .filter(Boolean)
         .filter((el, i, arr) => arr.findIndex((x) => x.id === el.id) === i);
 
       origin = { lat, lon };
-      items.sort((a, b) => haversine(lat, lon, a.lat, a.lon) - haversine(lat, lon, b.lat, b.lon));
+      raw.sort((a, b) => haversine(lat, lon, a.lat, a.lon) - haversine(lat, lon, b.lat, b.lon));
+      const items = dedupFuzzy(raw);
 
       rawItems = items;
       renderFilters();
@@ -702,7 +738,11 @@
         if (group.getLayers().length) map.fitBounds(group.getBounds().pad(0.15));
       } else {
         map.setView([lat, lon], 14);
-        setStatus("Nenhum local encontrado. Tente aumentar o raio ou outra região.", "error");
+        const osmEdit = `https://www.openstreetmap.org/edit?editor=id#map=18/${lat.toFixed(5)}/${lon.toFixed(5)}`;
+        setStatus(
+          `Nenhum local encontrado. Aumente o raio ou <a href="${osmEdit}" target="_blank" rel="noopener">➕ adicione um local ao OpenStreetMap</a>.`,
+          "error"
+        );
       }
     } catch (err) {
       console.error(err);
