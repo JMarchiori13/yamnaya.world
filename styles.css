@@ -204,6 +204,34 @@ body {
   background: var(--panel-2);
 }
 .results .actions a:hover { background: #253244; }
+.results .actions .review-btn {
+  font-weight: 600;
+}
+.results .actions .review-btn.google {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #78350f;
+  border-color: #d97706;
+}
+.results .actions .review-btn.google:hover {
+  background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+}
+.results .actions .review-btn.ta {
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  color: #064e3b;
+  border-color: #047857;
+}
+.results .actions .review-btn.ta:hover {
+  background: linear-gradient(135deg, #a7f3d0 0%, #6ee7b7 100%);
+}
+.results .price {
+  background: #052e16;
+  color: #86efac;
+  border: 1px solid #14532d;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
 
 .credits {
   padding: 10px 12px;

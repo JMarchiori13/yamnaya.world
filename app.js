@@ -25,17 +25,13 @@
     { id: "swedish", label: "Sueca", keywords: ["swedish", "sueca", "sueco"] },
     { id: "shiatsu", label: "Shiatsu", keywords: ["shiatsu"] },
     { id: "relax", label: "Relaxante", keywords: ["relax"] },
-    { id: "deep", label: "Profunda", keywords: ["deep tissue", "deep-tissue", "profunda", "tecido profundo"] },
-    { id: "sports", label: "Desportiva", keywords: ["sport", "desportiv", "esportiv"] },
     { id: "reflex", label: "Reflexologia", keywords: ["reflex"] },
     { id: "lymph", label: "Drenagem linfática", keywords: ["lymph", "linfátic", "linfatic", "drenagem"] },
     { id: "tantric", label: "Tântrica", keywords: ["tantric", "tântric"] },
     { id: "ayurveda", label: "Ayurveda", keywords: ["ayurved"] },
     { id: "hotstone", label: "Pedras quentes", keywords: ["hot stone", "hot-stone", "pedras quentes", "pedra quente"] },
     { id: "chair", label: "Quick/Cadeira", keywords: ["quick massage", "chair massage", "cadeira"] },
-    { id: "acupuncture", label: "Acupuntura", keywords: ["acupunc"] },
     { id: "spa", label: "Spa", categories: ["Spa", "Sauna"] },
-    { id: "physio", label: "Fisioterapia", categories: ["Fisioterapia"] },
   ];
   let activeFilter = "all";
   let rawItems = [];
@@ -88,16 +84,41 @@
   }
 
   function tagsToCategory(tags = {}) {
-    if (tags.healthcare === "physiotherapist") return "Fisioterapia";
-    if (tags.healthcare === "alternative" && tags["healthcare:speciality"]) {
-      return tags["healthcare:speciality"].replace(/_/g, " ");
-    }
     if (tags.shop === "massage") return "Massagem";
     if (tags.leisure === "spa" || tags.amenity === "spa") return "Spa";
     if (tags.amenity === "sauna") return "Sauna";
     if (tags.amenity === "massage" || tags.craft === "massage") return "Massagem";
     if (tags.healthcare === "massage") return "Massoterapia";
     return "Bem-estar";
+  }
+
+  const CURRENCY_SYMBOLS = { BRL: "R$", USD: "US$", EUR: "€", GBP: "£" };
+
+  function priceLabel(tags = {}) {
+    if (tags.fee === "no") return "Grátis";
+    const value = tags.charge || (tags.fee && tags.fee !== "yes" ? tags.fee : null);
+    if (!value) return null;
+    const currency = tags["fee:currency"] || tags["charge:currency"];
+    if (currency && !/[^\d]/.test(value)) {
+      const sym = CURRENCY_SYMBOLS[currency] || currency;
+      return `${sym} ${value}`;
+    }
+    return value;
+  }
+
+  function cityFromTags(tags = {}) {
+    return tags["addr:city"] || tags["addr:town"] || tags["addr:village"] || tags["addr:suburb"] || "";
+  }
+
+  function googleReviewUrl(item) {
+    const q = [item.name, cityFromTags(item.tags)].filter(Boolean).join(" ");
+    const query = q ? `${q} ${item.lat},${item.lon}` : `${item.lat},${item.lon}`;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  }
+
+  function tripadvisorSearchUrl(item) {
+    const q = [item.name, cityFromTags(item.tags)].filter(Boolean).join(" ");
+    return `https://www.tripadvisor.com/Search?q=${encodeURIComponent(q || item.name)}`;
   }
 
   function formatAddress(tags = {}) {
@@ -123,13 +144,10 @@
         way(around:${radius},${lat},${lon})[craft=massage];
         node(around:${radius},${lat},${lon})[healthcare=massage];
         way(around:${radius},${lat},${lon})[healthcare=massage];
-        node(around:${radius},${lat},${lon})[healthcare=physiotherapist];
-        way(around:${radius},${lat},${lon})[healthcare=physiotherapist];
         node(around:${radius},${lat},${lon})[leisure=spa];
         way(around:${radius},${lat},${lon})[leisure=spa];
         node(around:${radius},${lat},${lon})[amenity=spa];
         way(around:${radius},${lat},${lon})[amenity=spa];
-        node(around:${radius},${lat},${lon})[healthcare=alternative][healthcare:speciality~"massage|shiatsu|acupuncture|ayurveda|reflexology",i];
       );
       out center tags;
     `;
@@ -271,17 +289,23 @@
       const osm = `https://www.openstreetmap.org/${item.id}`;
 
       const types = detectedTypes(item);
+      const price = priceLabel(item.tags);
+      const reviewUrl = googleReviewUrl(item);
+      const taUrl = tripadvisorSearchUrl(item);
       li.innerHTML = `
         <div class="name">${escapeHtml(item.name)}</div>
         <div class="meta">
           <span class="tag">${escapeHtml(item.category)}</span>
           ${types.map((t) => `<span class="tag type">${escapeHtml(t)}</span>`).join("")}
           ${distance != null ? `<span>📍 ${formatDistance(distance)}</span>` : ""}
+          ${price ? `<span class="price">💰 ${escapeHtml(price)}</span>` : ""}
           ${item.opening ? `<span>🕒 ${escapeHtml(item.opening)}</span>` : ""}
           ${item.phone ? `<span>📞 ${escapeHtml(item.phone)}</span>` : ""}
         </div>
         ${item.address ? `<div class="addr">${escapeHtml(item.address)}</div>` : ""}
         <div class="actions">
+          <a class="review-btn google" href="${reviewUrl}" target="_blank" rel="noopener">⭐ Avaliações no Google</a>
+          <a class="review-btn ta" href="${taUrl}" target="_blank" rel="noopener">🌴 TripAdvisor</a>
           <a href="${gmaps}" target="_blank" rel="noopener">🧭 Rota</a>
           ${item.website ? `<a href="${escapeAttr(item.website)}" target="_blank" rel="noopener">🌐 Site</a>` : ""}
           ${item.phone ? `<a href="tel:${escapeAttr(item.phone)}">📞 Ligar</a>` : ""}
@@ -311,13 +335,18 @@
 
   function popupHtml(item) {
     const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${item.lat},${item.lon}`;
+    const price = priceLabel(item.tags);
     return `
       <strong>${escapeHtml(item.name)}</strong>
-      <div>${escapeHtml(item.category)}</div>
+      <div>${escapeHtml(item.category)}${price ? ` · <span style="color:#86efac">💰 ${escapeHtml(price)}</span>` : ""}</div>
       ${item.address ? `<div style="margin-top:4px;color:#94a3b8">${escapeHtml(item.address)}</div>` : ""}
       ${item.phone ? `<div style="margin-top:4px">📞 <a href="tel:${escapeAttr(item.phone)}">${escapeHtml(item.phone)}</a></div>` : ""}
       ${item.website ? `<div style="margin-top:4px">🌐 <a href="${escapeAttr(item.website)}" target="_blank" rel="noopener">Site</a></div>` : ""}
-      <div style="margin-top:6px"><a href="${gmaps}" target="_blank" rel="noopener">🧭 Como chegar</a></div>
+      <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="${googleReviewUrl(item)}" target="_blank" rel="noopener">⭐ Google</a>
+        <a href="${tripadvisorSearchUrl(item)}" target="_blank" rel="noopener">🌴 TripAdvisor</a>
+        <a href="${gmaps}" target="_blank" rel="noopener">🧭 Rota</a>
+      </div>
     `;
   }
 
