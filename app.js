@@ -109,6 +109,26 @@
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(map);
 
+  const LocateControl = L.Control.extend({
+    onAdd() {
+      const btn = L.DomUtil.create("button", "leaflet-bar locate-btn");
+      btn.type = "button";
+      btn.title = "Centralizar em mim";
+      btn.innerHTML = "⌖";
+      L.DomEvent.disableClickPropagation(btn);
+      L.DomEvent.on(btn, "click", () => {
+        if (userMarker) {
+          const { lat, lng } = userMarker.getLatLng();
+          map.setView([lat, lng], Math.max(map.getZoom(), 15));
+        } else {
+          locateMe();
+        }
+      });
+      return btn;
+    },
+  });
+  new LocateControl({ position: "topleft" }).addTo(map);
+
   const userIcon = L.divIcon({
     className: "user-marker",
     html: '<div style="width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 0 3px rgba(59,130,246,0.35);"></div>',
@@ -750,9 +770,21 @@
     }
   }
 
-  function placeUser(lat, lon) {
+  let userAccuracyCircle = null;
+  function placeUser(lat, lon, accuracy) {
     if (userMarker) map.removeLayer(userMarker);
+    if (userAccuracyCircle) { map.removeLayer(userAccuracyCircle); userAccuracyCircle = null; }
     userMarker = L.marker([lat, lon], { icon: userIcon, title: "Você está aqui" }).addTo(map);
+    if (accuracy && accuracy > 0) {
+      userAccuracyCircle = L.circle([lat, lon], {
+        radius: accuracy,
+        color: "#3b82f6",
+        weight: 1,
+        fillColor: "#3b82f6",
+        fillOpacity: 0.1,
+        interactive: false,
+      }).addTo(map);
+    }
     map.setView([lat, lon], 14);
   }
 
@@ -766,8 +798,8 @@
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         els.locate.disabled = false;
-        const { latitude, longitude } = pos.coords;
-        placeUser(latitude, longitude);
+        const { latitude, longitude, accuracy } = pos.coords;
+        placeUser(latitude, longitude, accuracy);
         searchNearby(latitude, longitude, Number(els.radius.value));
       },
       (err) => {
@@ -870,6 +902,24 @@
   }
 
   els.locate.addEventListener("click", locateMe);
+
+  const sidebarEl = document.querySelector(".sidebar");
+  const toggleBtn = document.getElementById("toggleSidebar");
+  if (toggleBtn && sidebarEl) {
+    const pref = STORE.get("sidebarCollapsed");
+    if (pref) {
+      sidebarEl.classList.add("collapsed");
+      toggleBtn.textContent = "▸";
+      toggleBtn.setAttribute("aria-expanded", "false");
+    }
+    toggleBtn.addEventListener("click", () => {
+      const collapsed = sidebarEl.classList.toggle("collapsed");
+      toggleBtn.textContent = collapsed ? "▸" : "▾";
+      toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      STORE.set("sidebarCollapsed", collapsed);
+      setTimeout(() => map.invalidateSize(), 220);
+    });
+  }
 
   els.radius.addEventListener("change", () => {
     if (userMarker) {
