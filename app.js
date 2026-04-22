@@ -16,7 +16,30 @@
     radius: document.getElementById("radius"),
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
+    filters: document.getElementById("filters"),
   };
+
+  const FILTERS = [
+    { id: "all", label: "Todos" },
+    { id: "thai", label: "Tailandesa", keywords: ["thai", "tailandes"] },
+    { id: "swedish", label: "Sueca", keywords: ["swedish", "sueca", "sueco"] },
+    { id: "shiatsu", label: "Shiatsu", keywords: ["shiatsu"] },
+    { id: "relax", label: "Relaxante", keywords: ["relax"] },
+    { id: "deep", label: "Profunda", keywords: ["deep tissue", "deep-tissue", "profunda", "tecido profundo"] },
+    { id: "sports", label: "Desportiva", keywords: ["sport", "desportiv", "esportiv"] },
+    { id: "reflex", label: "Reflexologia", keywords: ["reflex"] },
+    { id: "lymph", label: "Drenagem linfática", keywords: ["lymph", "linfátic", "linfatic", "drenagem"] },
+    { id: "tantric", label: "Tântrica", keywords: ["tantric", "tântric"] },
+    { id: "ayurveda", label: "Ayurveda", keywords: ["ayurved"] },
+    { id: "hotstone", label: "Pedras quentes", keywords: ["hot stone", "hot-stone", "pedras quentes", "pedra quente"] },
+    { id: "chair", label: "Quick/Cadeira", keywords: ["quick massage", "chair massage", "cadeira"] },
+    { id: "acupuncture", label: "Acupuntura", keywords: ["acupunc"] },
+    { id: "spa", label: "Spa", categories: ["Spa", "Sauna"] },
+    { id: "physio", label: "Fisioterapia", categories: ["Fisioterapia"] },
+  ];
+  let activeFilter = "all";
+  let rawItems = [];
+  let origin = null;
 
   const map = L.map(els.map, { zoomControl: true }).setView([-14.235, -51.9253], 4);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -149,9 +172,87 @@
     };
   }
 
+  function detectedTypes(item) {
+    return FILTERS
+      .filter((f) => f.id !== "all" && matchesFilter(item, f.id))
+      .map((f) => f.label);
+  }
+
   function clearMarkers() {
     for (const m of markers.values()) map.removeLayer(m);
     markers.clear();
+  }
+
+  function itemHaystack(item) {
+    const t = item.tags || {};
+    return [
+      item.name, item.category,
+      t.massage, t.cuisine,
+      t["healthcare:speciality"], t["healthcare:speciality:pt"],
+      t.description, t["description:pt"],
+      t.alt_name, t.short_name,
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function matchesFilter(item, filterId) {
+    const f = FILTERS.find((x) => x.id === filterId);
+    if (!f || f.id === "all") return true;
+    if (f.categories && f.categories.includes(item.category)) return true;
+    if (f.keywords) {
+      const hay = itemHaystack(item);
+      return f.keywords.some((k) => hay.includes(k));
+    }
+    return false;
+  }
+
+  function countFor(filterId) {
+    return rawItems.reduce((n, it) => n + (matchesFilter(it, filterId) ? 1 : 0), 0);
+  }
+
+  function renderFilters() {
+    els.filters.innerHTML = "";
+    const hasData = rawItems.length > 0;
+    for (const f of FILTERS) {
+      const count = hasData ? countFor(f.id) : null;
+      if (hasData && f.id !== "all" && count === 0) continue;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chip" + (activeFilter === f.id ? " active" : "");
+      btn.dataset.id = f.id;
+      btn.innerHTML = escapeHtml(f.label) + (count != null ? ` <span class="count">${count}</span>` : "");
+      btn.addEventListener("click", () => {
+        if (activeFilter === f.id) return;
+        activeFilter = f.id;
+        renderFilters();
+        applyFilter();
+      });
+      els.filters.appendChild(btn);
+    }
+  }
+
+  function applyFilter() {
+    const filtered = rawItems.filter((it) => matchesFilter(it, activeFilter));
+    clearMarkers();
+    for (const item of filtered) {
+      const marker = L.marker([item.lat, item.lon], { icon: placeIcon })
+        .addTo(map)
+        .bindPopup(popupHtml(item));
+      marker.on("click", () => {
+        const li = els.results.querySelector(`li[data-id="${CSS.escape(item.id)}"]`);
+        if (li) {
+          document.querySelectorAll("#results li.active").forEach((n) => n.classList.remove("active"));
+          li.classList.add("active");
+          li.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      });
+      markers.set(item.id, marker);
+    }
+    renderResults(filtered, origin);
+
+    const active = FILTERS.find((x) => x.id === activeFilter);
+    const label = active && active.id !== "all" ? ` · filtro: <strong>${escapeHtml(active.label)}</strong>` : "";
+    if (!rawItems.length) return;
+    setStatus(`<strong>${filtered.length}</strong> de ${rawItems.length} local(is)${label}.`);
   }
 
   function renderResults(items, origin) {
@@ -169,10 +270,12 @@
       const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${item.lat},${item.lon}`;
       const osm = `https://www.openstreetmap.org/${item.id}`;
 
+      const types = detectedTypes(item);
       li.innerHTML = `
         <div class="name">${escapeHtml(item.name)}</div>
         <div class="meta">
           <span class="tag">${escapeHtml(item.category)}</span>
+          ${types.map((t) => `<span class="tag type">${escapeHtml(t)}</span>`).join("")}
           ${distance != null ? `<span>📍 ${formatDistance(distance)}</span>` : ""}
           ${item.opening ? `<span>🕒 ${escapeHtml(item.opening)}</span>` : ""}
           ${item.phone ? `<span>📞 ${escapeHtml(item.phone)}</span>` : ""}
@@ -221,6 +324,8 @@
   async function searchNearby(lat, lon, radius) {
     setStatus(`Procurando casas de massagem em ${(radius / 1000).toFixed(0)} km…`, "loading");
     clearMarkers();
+    rawItems = [];
+    renderFilters();
 
     if (searchCircle) map.removeLayer(searchCircle);
     searchCircle = L.circle([lat, lon], {
@@ -237,30 +342,16 @@
         .filter(Boolean)
         .filter((el, i, arr) => arr.findIndex((x) => x.id === el.id) === i);
 
-      const origin = { lat, lon };
+      origin = { lat, lon };
       items.sort((a, b) => haversine(lat, lon, a.lat, a.lon) - haversine(lat, lon, b.lat, b.lon));
 
-      for (const item of items) {
-        const marker = L.marker([item.lat, item.lon], { icon: placeIcon })
-          .addTo(map)
-          .bindPopup(popupHtml(item));
-        marker.on("click", () => {
-          const li = els.results.querySelector(`li[data-id="${CSS.escape(item.id)}"]`);
-          if (li) {
-            document.querySelectorAll("#results li.active").forEach((n) => n.classList.remove("active"));
-            li.classList.add("active");
-            li.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          }
-        });
-        markers.set(item.id, marker);
-      }
-
-      renderResults(items, origin);
+      rawItems = items;
+      renderFilters();
+      applyFilter();
 
       if (items.length) {
         const group = L.featureGroup([userMarker, ...markers.values(), searchCircle].filter(Boolean));
-        map.fitBounds(group.getBounds().pad(0.15));
-        setStatus(`<strong>${items.length}</strong> local(is) encontrado(s) num raio de ${(radius / 1000).toFixed(0)} km.`);
+        if (group.getLayers().length) map.fitBounds(group.getBounds().pad(0.15));
       } else {
         map.setView([lat, lon], 14);
         setStatus("Nenhum local encontrado. Tente aumentar o raio ou outra região.", "error");
@@ -336,4 +427,6 @@
       setStatus("Erro ao buscar endereço: " + err.message, "error");
     }
   });
+
+  renderFilters();
 })();
