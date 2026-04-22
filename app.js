@@ -304,6 +304,10 @@
         activeFilter = f.id;
         renderFilters();
         applyFilter();
+        if (lastSearch) {
+          saveState(lastSearch.lat, lastSearch.lon, lastSearch.radius, activeFilter);
+          writeURLState(lastSearch.lat, lastSearch.lon, lastSearch.radius, activeFilter);
+        }
       });
       els.filters.appendChild(btn);
     }
@@ -412,6 +416,36 @@
   }
 
   let lastSearch = null;
+  const STATE_TTL_MS = 30 * 60 * 1000;
+
+  function saveState(lat, lon, radius, filter) {
+    STORE.set("state", { lat, lon, radius, filter, ts: Date.now() });
+  }
+  function loadFreshState() {
+    const s = STORE.get("state");
+    if (!s || !s.ts) return null;
+    if (Date.now() - s.ts > STATE_TTL_MS) return null;
+    return s;
+  }
+
+  function writeURLState(lat, lon, radius, filter) {
+    const p = new URLSearchParams();
+    p.set("lat", lat.toFixed(5));
+    p.set("lon", lon.toFixed(5));
+    p.set("r", String(radius));
+    if (filter && filter !== "all") p.set("f", filter);
+    const newUrl = `${location.pathname}?${p.toString()}${location.hash}`;
+    history.replaceState(null, "", newUrl);
+  }
+  function readURLState() {
+    const p = new URLSearchParams(location.search);
+    const lat = parseFloat(p.get("lat"));
+    const lon = parseFloat(p.get("lon"));
+    const r = parseInt(p.get("r"), 10);
+    const f = p.get("f");
+    if (!isFinite(lat) || !isFinite(lon) || !isFinite(r)) return null;
+    return { lat, lon, radius: r, filter: f || "all" };
+  }
 
   function formatAge(ms) {
     const s = Math.round(ms / 1000);
@@ -479,6 +513,8 @@
       renderFilters();
       applyFilter();
       renderCacheBadge({ fromCache, ageMs });
+      saveState(lat, lon, radius, activeFilter);
+      writeURLState(lat, lon, radius, activeFilter);
 
       if (items.length) {
         const group = L.featureGroup([userMarker, ...markers.values(), searchCircle].filter(Boolean));
@@ -559,5 +595,31 @@
     }
   });
 
-  renderFilters();
+  function applyValidRadius(r) {
+    const options = Array.from(els.radius.options).map((o) => Number(o.value));
+    const closest = options.reduce((a, b) => Math.abs(b - r) < Math.abs(a - r) ? b : a, options[0]);
+    els.radius.value = String(closest);
+    return closest;
+  }
+
+  function init() {
+    renderFilters();
+    const urlState = readURLState();
+    if (urlState) {
+      applyValidRadius(urlState.radius);
+      activeFilter = urlState.filter;
+      placeUser(urlState.lat, urlState.lon);
+      searchNearby(urlState.lat, urlState.lon, Number(els.radius.value));
+      return;
+    }
+    const saved = loadFreshState();
+    if (saved) {
+      applyValidRadius(saved.radius);
+      activeFilter = saved.filter || "all";
+      placeUser(saved.lat, saved.lon);
+      searchNearby(saved.lat, saved.lon, Number(els.radius.value));
+    }
+  }
+
+  init();
 })();
