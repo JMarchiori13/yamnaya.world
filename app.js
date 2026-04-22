@@ -53,10 +53,12 @@
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
     filters: document.getElementById("filters"),
+    sortBy: document.getElementById("sortBy"),
   };
 
   const FILTERS = [
     { id: "all", label: "Todos" },
+    { id: "openNow", label: "🟢 Aberto agora", special: "openNow" },
     { id: "thai", label: "Tailandesa", keywords: ["thai", "tailandes"] },
     { id: "swedish", label: "Sueca", keywords: ["swedish", "sueca", "sueco"] },
     { id: "shiatsu", label: "Shiatsu", keywords: ["shiatsu"] },
@@ -129,6 +131,102 @@
   }
 
   const CURRENCY_SYMBOLS = { BRL: "R$", USD: "US$", EUR: "€", GBP: "£" };
+
+  const DOW = { Su: 0, Mo: 1, Tu: 2, We: 3, Th: 4, Fr: 5, Sa: 6 };
+
+  function parseDayToken(token) {
+    const days = new Set();
+    for (const part of token.split(",")) {
+      const p = part.trim();
+      if (p.includes("-")) {
+        const [a, b] = p.split("-").map((x) => x.trim());
+        if (DOW[a] == null || DOW[b] == null) return null;
+        let d = DOW[a];
+        for (let i = 0; i < 7; i++) {
+          days.add(d);
+          if (d === DOW[b]) break;
+          d = (d + 1) % 7;
+        }
+      } else {
+        if (DOW[p] == null) return null;
+        days.add(DOW[p]);
+      }
+    }
+    return days;
+  }
+
+  function parseOpeningHours(str, now = new Date()) {
+    if (!str || typeof str !== "string") return { state: "unknown" };
+    const s = str.trim();
+    if (!s) return { state: "unknown" };
+    if (s === "24/7") return { state: "open", always: true };
+
+    const dow = now.getDay();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+
+    let foundOpen = false;
+    let nextClose = null;
+    let nextOpen = null;
+
+    for (const rule of s.split(";").map((x) => x.trim()).filter(Boolean)) {
+      const idx = rule.search(/\d/);
+      if (idx === -1) continue;
+      const daysPart = rule.slice(0, idx).trim();
+      const timesPart = rule.slice(idx).trim();
+
+      let days;
+      if (!daysPart) {
+        days = new Set([0, 1, 2, 3, 4, 5, 6]);
+      } else {
+        days = parseDayToken(daysPart);
+        if (!days) return { state: "unknown" };
+      }
+      if (!days.has(dow)) continue;
+
+      for (const range of timesPart.split(",").map((x) => x.trim())) {
+        const m = range.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+        if (!m) return { state: "unknown" };
+        const startMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        let endMin = parseInt(m[3], 10) * 60 + parseInt(m[4], 10);
+        if (endMin === 0) endMin = 24 * 60;
+        if (endMin <= startMin) endMin = 24 * 60;
+        if (minutes >= startMin && minutes < endMin) {
+          foundOpen = true;
+          if (nextClose == null || endMin < nextClose) nextClose = endMin;
+        } else if (minutes < startMin) {
+          if (nextOpen == null || startMin < nextOpen) nextOpen = startMin;
+        }
+      }
+    }
+
+    if (foundOpen) return { state: "open", closesAtMin: nextClose };
+    if (nextOpen != null) return { state: "closed", opensAtMin: nextOpen };
+    return { state: "closed" };
+  }
+
+  function formatTime(min) {
+    const h = String(Math.floor(min / 60) % 24).padStart(2, "0");
+    const m = String(min % 60).padStart(2, "0");
+    return `${h}:${m}`;
+  }
+
+  function openingBadgeHtml(str, now = new Date()) {
+    const r = parseOpeningHours(str, now);
+    if (r.state === "open") {
+      if (r.always) return `<span class="open-now">🟢 Aberto 24h</span>`;
+      if (r.closesAtMin != null) return `<span class="open-now">🟢 Aberto · fecha ${formatTime(r.closesAtMin)}</span>`;
+      return `<span class="open-now">🟢 Aberto</span>`;
+    }
+    if (r.state === "closed") {
+      if (r.opensAtMin != null) return `<span class="closed">🔴 Fechado · abre ${formatTime(r.opensAtMin)}</span>`;
+      return `<span class="closed">🔴 Fechado</span>`;
+    }
+    return null;
+  }
+
+  function isOpenNow(str, now = new Date()) {
+    return parseOpeningHours(str, now).state === "open";
+  }
 
   function priceLabel(tags = {}) {
     if (tags.fee === "no") return "Grátis";
@@ -253,7 +351,7 @@
 
   function detectedTypes(item) {
     return FILTERS
-      .filter((f) => f.id !== "all" && matchesFilter(item, f.id))
+      .filter((f) => f.id !== "all" && !f.special && matchesFilter(item, f.id))
       .map((f) => f.label);
   }
 
@@ -276,6 +374,7 @@
   function matchesFilter(item, filterId) {
     const f = FILTERS.find((x) => x.id === filterId);
     if (!f || f.id === "all") return true;
+    if (f.special === "openNow") return item.opening ? isOpenNow(item.opening) : false;
     if (f.categories && f.categories.includes(item.category)) return true;
     if (f.keywords) {
       const hay = itemHaystack(item);
@@ -313,8 +412,30 @@
     }
   }
 
+  function sortItems(items, key) {
+    const now = new Date();
+    const byDist = (a, b) => origin
+      ? haversine(origin.lat, origin.lon, a.lat, a.lon) - haversine(origin.lat, origin.lon, b.lat, b.lon)
+      : 0;
+    if (key === "name") {
+      return [...items].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+    }
+    if (key === "open") {
+      return [...items].sort((a, b) => {
+        const ao = a.opening && isOpenNow(a.opening, now) ? 0 : 1;
+        const bo = b.opening && isOpenNow(b.opening, now) ? 0 : 1;
+        if (ao !== bo) return ao - bo;
+        return byDist(a, b);
+      });
+    }
+    return [...items].sort(byDist);
+  }
+
   function applyFilter() {
-    const filtered = rawItems.filter((it) => matchesFilter(it, activeFilter));
+    const filtered = sortItems(
+      rawItems.filter((it) => matchesFilter(it, activeFilter)),
+      els.sortBy ? els.sortBy.value : "dist"
+    );
     clearMarkers();
     for (const item of filtered) {
       const marker = L.marker([item.lat, item.lon], { icon: placeIcon })
@@ -364,7 +485,7 @@
           ${types.map((t) => `<span class="tag type">${escapeHtml(t)}</span>`).join("")}
           ${distance != null ? `<span>📍 ${formatDistance(distance)}</span>` : ""}
           ${price ? `<span class="price">💰 ${escapeHtml(price)}</span>` : ""}
-          ${item.opening ? `<span>🕒 ${escapeHtml(item.opening)}</span>` : ""}
+          ${item.opening ? (openingBadgeHtml(item.opening) || `<span>🕒 ${escapeHtml(item.opening)}</span>`) : ""}
           ${item.phone ? `<span>📞 ${escapeHtml(item.phone)}</span>` : ""}
         </div>
         ${item.address ? `<div class="addr">${escapeHtml(item.address)}</div>` : ""}
@@ -579,6 +700,17 @@
       searchNearby(lat, lng, Number(els.radius.value));
     }
   });
+
+  if (els.sortBy) {
+    const savedSort = STORE.get("sort");
+    if (savedSort && [...els.sortBy.options].some((o) => o.value === savedSort)) {
+      els.sortBy.value = savedSort;
+    }
+    els.sortBy.addEventListener("change", () => {
+      STORE.set("sort", els.sortBy.value);
+      if (rawItems.length) applyFilter();
+    });
+  }
 
   els.searchForm.addEventListener("submit", async (e) => {
     e.preventDefault();

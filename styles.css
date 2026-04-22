@@ -121,6 +121,41 @@ body {
 }
 .filters .chip.active .count { opacity: 0.85; }
 
+.sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.sort-bar select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.open-now {
+  background: #052e16;
+  color: #86efac;
+  border: 1px solid #14532d;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.closed {
+  background: #450a0a;
+  color: #fca5a5;
+  border: 1px solid #7f1d1d;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
 .cache-badge {
   padding: 8px 12px;
   font-size: 12px;
